@@ -116,7 +116,7 @@ public class ARIESRecoveryManager implements RecoveryManager {
         // TODO(proj5): implement
         TransactionTableEntry Xact = transactionTable.get(transNum);
         long temp_LSN = logManager.appendToLog(new AbortTransactionLogRecord(transNum, Xact.lastLSN));
-        logManager.flushToLSN(temp_LSN);
+        //logManager.flushToLSN(temp_LSN);
         Xact.lastLSN = temp_LSN;
         Xact.transaction.setStatus(Transaction.Status.ABORTING);
         return temp_LSN;
@@ -142,7 +142,7 @@ public class ARIESRecoveryManager implements RecoveryManager {
             rollbackToLSN(transNum, 0);
         }
         long temp_LSN = logManager.appendToLog(new EndTransactionLogRecord(transNum, Xact.lastLSN));
-        logManager.flushToLSN(temp_LSN);
+        //logManager.flushToLSN(temp_LSN);
         Xact.lastLSN = temp_LSN;
         transactionTable.remove(transNum);
         Xact.transaction.setStatus(Transaction.Status.COMPLETE);
@@ -234,7 +234,14 @@ public class ARIESRecoveryManager implements RecoveryManager {
         assert (before.length == after.length);
         assert (before.length <= BufferManager.EFFECTIVE_PAGE_SIZE / 2);
         // TODO(proj5): implement
-        return -1L;
+        TransactionTableEntry Xact = transactionTable.get(transNum);
+        long temp_LSN = logManager.appendToLog(new UpdatePageLogRecord(transNum, pageNum, Xact.lastLSN, pageOffset, before, after));
+        //logManager.flushToLSN(temp_LSN);
+        Xact.lastLSN = temp_LSN;
+        if (!dirtyPageTable.containsKey(pageNum)) {
+            dirtyPageTable.put(pageNum, temp_LSN);
+        }
+        return temp_LSN;
     }
 
     /**
