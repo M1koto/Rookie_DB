@@ -420,7 +420,6 @@ public class ARIESRecoveryManager implements RecoveryManager {
         rollbackToLSN(transNum, savepointLSN);
         return;
     }
-
     /**
      * Create a checkpoint.
      *
@@ -429,7 +428,7 @@ public class ARIESRecoveryManager implements RecoveryManager {
      * Then, end checkpoint records should be filled up as much as possible first
      * using recLSNs from the DPT, then status/lastLSNs from the transactions
      * table, and written when full (or when nothing is left to be written).
-     * You may find the method EndCheckpointLogRecord#fitsInOneRecord here to
+     * You may find the method EndCheckpointLogRecord.fitsInOneRecord here to
      * figure out when to write an end checkpoint record.
      *
      * Finally, the master record should be rewritten with the LSN of the
@@ -444,13 +443,48 @@ public class ARIESRecoveryManager implements RecoveryManager {
         Map<Long, Long> chkptDPT = new HashMap<>();
         Map<Long, Pair<Transaction.Status, Long>> chkptTxnTable = new HashMap<>();
 
+        Iterator<Map.Entry<Long, Long>> dpt_iter = dirtyPageTable.entrySet().iterator();
+        Iterator<Map.Entry<Long, TransactionTableEntry>> table_iter = transactionTable.entrySet().iterator();
         // TODO(proj5): generate end checkpoint record(s) for DPT and transaction table
-
+        boolean dpt_done = false;
+        boolean all_done = false;
+        int dpt_num = 0;
+        int table_num = 0;
+        while (!all_done) {
+            while (EndCheckpointLogRecord.fitsInOneRecord(dpt_num + 1, table_num) || EndCheckpointLogRecord.fitsInOneRecord(dpt_num, table_num + 1)) {
+                if (!dpt_done) {
+                    if (dpt_iter.hasNext()) {
+                        Map.Entry<Long, Long> temp = dpt_iter.next();
+                        chkptDPT.put(temp.getKey(), temp.getValue());
+                        dpt_num += 1;
+                    } else {
+                        dpt_done = true;
+                    }
+                } else {
+                    if (table_iter.hasNext()) {
+                        Map.Entry<Long, TransactionTableEntry> temp = table_iter.next();
+                        chkptTxnTable.put(temp.getKey(), new Pair<>(temp.getValue().transaction.getStatus(), temp.getValue().lastLSN));
+                        table_num += 1;
+                    } else {
+                        //done with both
+                        all_done = true;
+                        break;
+                    }
+                }
+            }
+            dpt_num = 0;
+            table_num = 0;
+            LogRecord endRecord = new EndCheckpointLogRecord(chkptDPT, chkptTxnTable);
+            logManager.appendToLog(endRecord);
+            flushToLSN(endRecord.getLSN());
+            chkptDPT.clear();
+            chkptTxnTable.clear();
+        }
         // Last end checkpoint record
-        LogRecord endRecord = new EndCheckpointLogRecord(chkptDPT, chkptTxnTable);
-        logManager.appendToLog(endRecord);
+        //LogRecord endRecord = new EndCheckpointLogRecord(chkptDPT, chkptTxnTable);
+        //logManager.appendToLog(endRecord);
         // Ensure checkpoint is fully flushed before updating the master record
-        flushToLSN(endRecord.getLSN());
+        //flushToLSN(endRecord.getLSN());
 
         // Update master record
         MasterLogRecord masterRecord = new MasterLogRecord(beginLSN);
