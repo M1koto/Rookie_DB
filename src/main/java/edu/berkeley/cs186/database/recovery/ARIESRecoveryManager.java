@@ -553,7 +553,7 @@ public class ARIESRecoveryManager implements RecoveryManager {
      *
      * If the log record is page-related, update the dpt
      *   - update/undoupdate page will dirty pages
-     *   - free/undoalloc page always flush changes to disk
+     *   - free/undoalloc page always flush changes to disk ????
      *   - no action needed for alloc/undofree page
      *
      * If the log record is for a change in transaction status:
@@ -588,6 +588,40 @@ public class ARIESRecoveryManager implements RecoveryManager {
         // Set of transactions that have completed
         Set<Long> endedTransactions = new HashSet<>();
         // TODO(proj5): implement
+        while (true) {
+            LogRecord temp = logManager.fetchLogRecord(LSN);
+            if (temp.getTransNum().isPresent()) {
+                long num = temp.getTransNum().get();
+                if (transactionTable.containsKey(num)) {
+                    transactionTable.get(num).lastLSN = LSN;
+                } else {
+                    transactionTable.put(num, new TransactionTableEntry(newTransaction.apply(num)));
+                }
+            } else if (temp.getType() == LogType.UPDATE_PAGE || temp.getType() == LogType.UNDO_UPDATE_PAGE) {
+                long num = temp.getPageNum().get();
+                if (!dirtyPageTable.containsKey(num)) {
+                    dirtyPageTable.put(num, LSN);
+                }
+            } else if (temp.getType() == LogType.END_TRANSACTION) {
+                Long num = temp.getTransNum().get();
+                transactionTable.get(num).transaction.cleanup();
+                transactionTable.remove(num);
+                endedTransactions.add(num);
+            } else if (temp.getType() == LogType.COMMIT_TRANSACTION || temp.getType() == LogType.ABORT_TRANSACTION) {
+                Long num = temp.getTransNum().get();
+                switch (temp.getType()) {
+                    case ABORT_TRANSACTION:
+                        transactionTable.get(num).transaction.setStatus(Transaction.Status.RECOVERY_ABORTING);
+                        break;
+                    case COMMIT_TRANSACTION:
+                        transactionTable.get(num).transaction.setStatus(Transaction.Status.COMMITTING);
+                        break;
+                }
+                transactionTable.get(num).lastLSN = LSN;
+            } else if (temp.getType() == LogType.END_CHECKPOINT) {
+                
+            }
+        }
         return;
     }
 
