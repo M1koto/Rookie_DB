@@ -641,7 +641,7 @@ public class ARIESRecoveryManager implements RecoveryManager {
                             startTransaction(t);
                             transactionTable.put(l, new TransactionTableEntry(t));
                         }
-                        transactionTable.get(l).lastLSN = Math.max(temp.getLSN(), transactionTable.get(l).lastLSN);
+                        transactionTable.get(l).lastLSN = Math.max(temp.getTransactionTable().get(l).getSecond(), transactionTable.get(l).lastLSN);
                     }
                     Transaction.Status s1 = temp.getTransactionTable().get(l).getFirst(); //this is priority
                     Transaction.Status s2 = transactionTable.get(l).transaction.getStatus();
@@ -667,6 +667,7 @@ public class ARIESRecoveryManager implements RecoveryManager {
                 LogRecord endRecord = new EndTransactionLogRecord(num, t.lastLSN);
                 logManager.appendToLog(endRecord);
                 transactionTable.remove(num);
+                //t.lastLSN = endRecord.getLSN();
             } else if (t.transaction.getStatus() == Transaction.Status.RUNNING) {
                 t.transaction.setStatus(Transaction.Status.RECOVERY_ABORTING);
                 LogRecord r = new AbortTransactionLogRecord(num, t.lastLSN);
