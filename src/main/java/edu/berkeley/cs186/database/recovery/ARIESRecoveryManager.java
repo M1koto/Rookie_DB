@@ -588,23 +588,28 @@ public class ARIESRecoveryManager implements RecoveryManager {
         // Set of transactions that have completed
         Set<Long> endedTransactions = new HashSet<>();
         // TODO(proj5): implement
-        while (true) {
+        while (logManager.fetchLogRecord(LSN) != null) {
             LogRecord temp = logManager.fetchLogRecord(LSN);
             if (temp.getTransNum().isPresent()) {
                 long num = temp.getTransNum().get();
-                if (transactionTable.containsKey(num)) {
-                    transactionTable.get(num).lastLSN = LSN;
-                } else {
-                    transactionTable.put(num, new TransactionTableEntry(newTransaction.apply(num)));
+                if (!transactionTable.containsKey(num)) {
+                    Transaction t = newTransaction.apply(num);
+                    startTransaction(t);
+                    transactionTable.put(num, new TransactionTableEntry(t));
                 }
+                transactionTable.get(num).lastLSN = LSN;
             } else if (temp.getType() == LogType.UPDATE_PAGE || temp.getType() == LogType.UNDO_UPDATE_PAGE) {
                 long num = temp.getPageNum().get();
                 if (!dirtyPageTable.containsKey(num)) {
                     dirtyPageTable.put(num, LSN);
                 }
+            } else if (temp.getType() == LogType.FREE_PAGE || temp.getType() == LogType.UNDO_ALLOC_PAGE) {
+                long num = temp.getPageNum().get();
+                dirtyPageTable.remove(num);
             } else if (temp.getType() == LogType.END_TRANSACTION) {
                 Long num = temp.getTransNum().get();
                 transactionTable.get(num).transaction.cleanup();
+                transactionTable.get(num).transaction.setStatus(Transaction.Status.COMPLETE);
                 transactionTable.remove(num);
                 endedTransactions.add(num);
             } else if (temp.getType() == LogType.COMMIT_TRANSACTION || temp.getType() == LogType.ABORT_TRANSACTION) {
@@ -619,10 +624,53 @@ public class ARIESRecoveryManager implements RecoveryManager {
                 }
                 transactionTable.get(num).lastLSN = LSN;
             } else if (temp.getType() == LogType.END_CHECKPOINT) {
-                
+                //DPT
+                Map<Long, Long> temp_dpt = new ConcurrentHashMap<>(temp.getDirtyPageTable());
+                for (Long l: dirtyPageTable.keySet()) {
+                    temp_dpt.putIfAbsent(l, dirtyPageTable.get(l));
+                }
+                dirtyPageTable = temp_dpt;
+                //Xact table
+                for (Long l: temp.getTransactionTable().keySet()) {
+                    if (!endedTransactions.contains(l)) {
+                        if (!transactionTable.containsKey(l)) {
+                            Transaction t = newTransaction.apply(l);
+                            startTransaction(t);
+                            transactionTable.put(l, new TransactionTableEntry(t));
+                        }
+                        transactionTable.get(l).lastLSN = Math.max(LSN, transactionTable.get(l).lastLSN);
+                    }
+                    Transaction.Status s1 = temp.getTransactionTable().get(l).getFirst(); //this is priority
+                    Transaction.Status s2 = transactionTable.get(l).transaction.getStatus();
+                    if (s1 != s2) {
+                        if (s1 == Transaction.Status.COMPLETE && (s2 == Transaction.Status.ABORTING || s2 == Transaction.Status.COMMITTING)) {
+                            transactionTable.get(l).transaction.setStatus(s1);
+                        } else if (s2 == Transaction.Status.RUNNING && (s1 == Transaction.Status.ABORTING || s1 == Transaction.Status.COMMITTING)) {
+                            if (s1 == Transaction.Status.ABORTING) {
+                                transactionTable.get(l).transaction.setStatus(Transaction.Status.RECOVERY_ABORTING);
+                            } else {
+                                transactionTable.get(l).transaction.setStatus(s1);
+                            }
+                        }
+                    }
+                }
             }
+            for (Long num: temp.getTransactionTable().keySet()) {
+                TransactionTableEntry t = transactionTable.get(num);
+                if (t.transaction.getStatus() == Transaction.Status.COMMITTING) {
+                    t.transaction.cleanup();
+                    t.transaction.setStatus(Transaction.Status.COMPLETE);
+                    LogRecord endRecord = new EndTransactionLogRecord(num, t.lastLSN);
+                    logManager.appendToLog(endRecord);
+                    transactionTable.remove(num);
+                } else if (t.transaction.getStatus() == Transaction.Status.RUNNING) {
+                    t.transaction.setStatus(Transaction.Status.RECOVERY_ABORTING);
+                    LogRecord r = new AbortTransactionLogRecord(num, t.lastLSN);
+                    logManager.appendToLog(r);
+                }
+            }
+            LSN += 10;
         }
-        return;
     }
 
     /**
