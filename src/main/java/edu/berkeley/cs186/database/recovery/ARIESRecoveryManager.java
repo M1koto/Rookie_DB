@@ -616,6 +616,7 @@ public class ARIESRecoveryManager implements RecoveryManager {
                 endedTransactions.add(num);
             } else if (temp.getType() == LogType.COMMIT_TRANSACTION || temp.getType() == LogType.ABORT_TRANSACTION) {
                 Long num = temp.getTransNum().get();
+                transactionTable.get(num).lastLSN = temp.getLSN();
                 switch (temp.getType()) {
                     case ABORT_TRANSACTION:
                         transactionTable.get(num).transaction.setStatus(Transaction.Status.RECOVERY_ABORTING);
@@ -624,7 +625,6 @@ public class ARIESRecoveryManager implements RecoveryManager {
                         transactionTable.get(num).transaction.setStatus(Transaction.Status.COMMITTING);
                         break;
                 }
-                transactionTable.get(num).lastLSN = temp.getLSN();
             } else if (temp.getType() == LogType.END_CHECKPOINT) {
                 //DPT
                 Map<Long, Long> temp_dpt = new ConcurrentHashMap<>(temp.getDirtyPageTable());
@@ -644,10 +644,14 @@ public class ARIESRecoveryManager implements RecoveryManager {
                         transactionTable.get(l).lastLSN = Math.max(temp.getTransactionTable().get(l).getSecond(), transactionTable.get(l).lastLSN);
                     }
                     Transaction.Status s1 = temp.getTransactionTable().get(l).getFirst(); //this is priority
-                    Transaction.Status s2 = transactionTable.get(l).transaction.getStatus();
+                    Transaction.Status s2 = s1;
+                    if (transactionTable.containsKey(l)) {
+                        s2 = transactionTable.get(l).transaction.getStatus();
+                    }
                     if (s1 != s2) {
                         if (s1 == Transaction.Status.COMPLETE && (s2 == Transaction.Status.ABORTING || s2 == Transaction.Status.COMMITTING)) {
                             transactionTable.get(l).transaction.setStatus(s1);
+                            //transactionTable.remove(l);
                         } else if (s2 == Transaction.Status.RUNNING && (s1 == Transaction.Status.ABORTING || s1 == Transaction.Status.COMMITTING)) {
                             if (s1 == Transaction.Status.ABORTING) {
                                 transactionTable.get(l).transaction.setStatus(Transaction.Status.RECOVERY_ABORTING);
