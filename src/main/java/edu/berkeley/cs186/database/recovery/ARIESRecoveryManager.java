@@ -761,7 +761,7 @@ public class ARIESRecoveryManager implements RecoveryManager {
             TransactionTableEntry t = p.getSecond();
             LogRecord r = logManager.fetchLogRecord(l);
             if (r.isUndoable()) {
-                LogRecord CLR = r.undo(r.getLSN());
+                LogRecord CLR = r.undo(t.lastLSN);
                 t.lastLSN = logManager.appendToLog(CLR);
                 CLR.redo(this, diskSpaceManager, bufferManager);
             }
