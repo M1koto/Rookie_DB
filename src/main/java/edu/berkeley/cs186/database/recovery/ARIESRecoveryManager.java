@@ -735,6 +735,16 @@ public class ARIESRecoveryManager implements RecoveryManager {
         return;
     }
 
+    static class LSNComparator implements Comparator<LogRecord>{
+
+        public int compare(LogRecord s1, LogRecord s2) {
+            if (s1.getLSN() < s2.getLSN())
+                return 1;
+            else if (s1.getLSN() > s2.getLSN())
+                return -1;
+            return 0;
+        }
+    }
     /**
      * This method performs the undo pass of restart recovery.
 
@@ -748,6 +758,32 @@ public class ARIESRecoveryManager implements RecoveryManager {
      */
     void restartUndo() {
         // TODO(proj5): implement
+        PriorityQueue<LogRecord> pq = new PriorityQueue(transactionTable.size(), new LSNComparator());
+        for (long l: transactionTable.keySet()) {
+            if (transactionTable.get(l).transaction.getStatus() == Transaction.Status.RECOVERY_ABORTING) {
+                pq.add(logManager.fetchLogRecord(transactionTable.get(l).lastLSN));
+            }
+        }
+
+        while (!pq.isEmpty()) {
+            LogRecord r = pq.remove();
+            if (r.isUndoable()) {
+                LogRecord CLR = r.undo(r.getLSN());
+                logManager.appendToLog(CLR);
+            }
+            long temp_lsn;
+            if (r.getUndoNextLSN().isPresent()) {
+                temp_lsn = r.getUndoNextLSN().get();
+            } else {
+                temp_lsn = r.getPrevLSN().get();
+            }
+
+            if (temp_lsn != 0) {
+                pq.add(logManager.fetchLogRecord(temp_lsn));
+            } else {
+                transactionTable.remove(temp_lsn);
+            }
+        }
         return;
     }
 
