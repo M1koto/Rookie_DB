@@ -772,9 +772,9 @@ public class ARIESRecoveryManager implements RecoveryManager {
                 temp_lsn = r.getPrevLSN().get();
             }
 
-            if (temp_lsn != 0 ) {
+            if (temp_lsn != 0) {
                 //LogRecord rec = logManager.fetchLogRecord(temp_lsn);
-                pq.add(new Pair(temp_lsn, transactionTable.get(l)));
+                pq.add(new Pair(temp_lsn, t));
             } else {
                 pq.remove(new Pair(l, t));
                 t.transaction.cleanup();
