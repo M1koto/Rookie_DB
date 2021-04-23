@@ -735,16 +735,6 @@ public class ARIESRecoveryManager implements RecoveryManager {
         return;
     }
 
-    static class LSNComparator implements Comparator<LogRecord>{
-
-        public int compare(LogRecord s1, LogRecord s2) {
-            if (s1.getLSN() < s2.getLSN())
-                return 1;
-            else if (s1.getLSN() > s2.getLSN())
-                return -1;
-            return 0;
-        }
-    }
     /**
      * This method performs the undo pass of restart recovery.
 
@@ -758,18 +748,22 @@ public class ARIESRecoveryManager implements RecoveryManager {
      */
     void restartUndo() {
         // TODO(proj5): implement
-        PriorityQueue<LogRecord> pq = new PriorityQueue(transactionTable.size(), new LSNComparator());
+        PriorityQueue<Pair<Long,TransactionTableEntry> > pq= new PriorityQueue<Pair<Long,TransactionTableEntry> >(transactionTable.size(), new PairFirstReverseComparator<Long, TransactionTableEntry>());
         for (long l: transactionTable.keySet()) {
             if (transactionTable.get(l).transaction.getStatus() == Transaction.Status.RECOVERY_ABORTING) {
-                pq.add(logManager.fetchLogRecord(transactionTable.get(l).lastLSN));
+                pq.add(new Pair(transactionTable.get(l).lastLSN, transactionTable.get(l)));
             }
         }
 
         while (!pq.isEmpty()) {
-            LogRecord r = pq.remove();
+            Pair<Long, TransactionTableEntry> p = pq.remove();
+            Long l = p.getFirst();
+            TransactionTableEntry t = p.getSecond();
+            LogRecord r = logManager.fetchLogRecord(l);
             if (r.isUndoable()) {
                 LogRecord CLR = r.undo(r.getLSN());
-                logManager.appendToLog(CLR);
+                t.lastLSN = logManager.appendToLog(CLR);
+                CLR.redo(this, diskSpaceManager, bufferManager);
             }
             long temp_lsn;
             if (r.getUndoNextLSN().isPresent()) {
@@ -778,10 +772,16 @@ public class ARIESRecoveryManager implements RecoveryManager {
                 temp_lsn = r.getPrevLSN().get();
             }
 
-            if (temp_lsn != 0) {
-                pq.add(logManager.fetchLogRecord(temp_lsn));
+            if (temp_lsn != 0 ) {
+                //LogRecord rec = logManager.fetchLogRecord(temp_lsn);
+                pq.add(new Pair(temp_lsn, transactionTable.get(l)));
             } else {
-                transactionTable.remove(temp_lsn);
+                pq.remove(new Pair(l, t));
+                t.transaction.cleanup();
+                t.transaction.setStatus(Transaction.Status.COMPLETE);
+                LogRecord endRecord = new EndTransactionLogRecord(t.transaction.getTransNum(), t.lastLSN);
+                logManager.appendToLog(endRecord);
+                transactionTable.remove(t.transaction.getTransNum());
             }
         }
         return;
