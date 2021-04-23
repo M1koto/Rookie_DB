@@ -7,7 +7,6 @@ import edu.berkeley.cs186.database.io.DiskSpaceManager;
 import edu.berkeley.cs186.database.memory.BufferManager;
 import edu.berkeley.cs186.database.memory.Page;
 import edu.berkeley.cs186.database.recovery.records.*;
-
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
@@ -695,6 +694,44 @@ public class ARIESRecoveryManager implements RecoveryManager {
      */
     void restartRedo() {
         // TODO(proj5): implement
+        if (!logManager.iterator().hasNext()) { //handle empty log
+            return;
+        }
+        long lowest = Integer.MAX_VALUE;
+        for (long l: dirtyPageTable.keySet()) {
+            if (lowest > dirtyPageTable.get(l)) {
+                lowest = dirtyPageTable.get(l);
+            }
+        }
+
+        Iterator<LogRecord> start = logManager.scanFrom(lowest);
+        List<LogType> redo_list1 = Arrays.asList(LogType.FREE_PART, LogType.UNDO_FREE_PART, LogType.ALLOC_PART, LogType.UNDO_ALLOC_PART, LogType.ALLOC_PAGE, LogType.UNDO_FREE_PAGE);
+        List<LogType> redo_list2 = Arrays.asList(LogType.UPDATE_PAGE, LogType.UNDO_UPDATE_PAGE, LogType.UNDO_ALLOC_PAGE, LogType.FREE_PAGE);
+        while (start.hasNext()) {
+            LogRecord temp = start.next();
+            if (temp.isRedoable()) {
+                if (redo_list1.contains(temp.getType())) {
+                    try {
+                        temp.redo(this, diskSpaceManager, bufferManager);
+                    } catch (IllegalStateException e) {
+
+                    }
+                } else if (redo_list2.contains(temp.getType())) {
+                    long page_num = temp.getPageNum().get();
+                    Page page = bufferManager.fetchPage(new DummyLockContext(), page_num);
+                    boolean flag = false;
+                    try {
+                        flag = page.getPageLSN() < temp.LSN;
+                    } finally {
+                        page.unpin();
+                    }
+                    if (dirtyPageTable.containsKey(page_num) && temp.LSN >= dirtyPageTable.get(page_num) && flag) {
+                        temp.redo(this, diskSpaceManager, bufferManager);
+                    }
+
+                }
+            }
+        }
         return;
     }
 
